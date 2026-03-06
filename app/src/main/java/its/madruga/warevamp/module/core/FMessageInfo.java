@@ -36,6 +36,11 @@ public class FMessageInfo {
     private static boolean initialized;
     public static Class<?> TYPE;
 
+    // Dynamically resolved Key class field references (replace hardcoded A00/A01/A02)
+    static Field keyRemoteJidField;
+    static Field keyMessageIdField;
+    static Field keyIsFromMeField;
+
     /**
      * Creates a new {@code FMessageInfo} wrapping the given raw WhatsApp message object.
      * Initialises all static reflective handles on first call.
@@ -62,6 +67,10 @@ public class FMessageInfo {
         messageMethod = newMessageMethod(loader);
         messageWithMediaMethod = newMessageWithMediaMethod(loader);
         mediaMessageClass = mediaMessageClass(loader);
+        // Resolve Key class fields dynamically (names change per WhatsApp version)
+        keyRemoteJidField = keyRemoteJidField(loader);
+        keyMessageIdField = keyMessageIdField(loader);
+        keyIsFromMeField  = keyIsFromMeField(loader);
     }
 
     /**
@@ -162,9 +171,19 @@ public class FMessageInfo {
 
         public Key(Object key) {
             this.thisObject = key;
-            this.messageID = (String) XposedHelpers.getObjectField(key, "A01");
-            this.isFromMe = XposedHelpers.getBooleanField(key, "A02");
-            this.remoteJid = XposedHelpers.getObjectField(key, "A00");
+            String id = null;
+            boolean fromMe = false;
+            Object jid = null;
+            try {
+                if (keyMessageIdField != null)  id   = (String)  keyMessageIdField.get(key);
+                if (keyIsFromMeField != null)   fromMe = keyIsFromMeField.getBoolean(key);
+                if (keyRemoteJidField != null)  jid  = keyRemoteJidField.get(key);
+            } catch (Exception e) {
+                XposedBridge.log(e);
+            }
+            this.messageID  = id;
+            this.isFromMe   = fromMe;
+            this.remoteJid  = jid;
         }
 
     }

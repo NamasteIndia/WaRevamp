@@ -161,7 +161,7 @@ public class ReferencesCache {
     }
 
     public static void saveConstructor(Constructor<?> constructor, String hookName) {
-        preferences.edit().putString(hookName,getConstructorPathString(constructor));
+        preferences.edit().putString(hookName, getConstructorPathString(constructor)).apply();
     }
 
     public static void saveClassPath(Class<?> clazz, String hookName) {

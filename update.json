@@ -1,6 +1,6 @@
 {
-  "version": "0.1.1",
-  "date": "13-03-2025",
-  "link": "https://t.me/warevampmodule/97",
-  "changelog": "| FIXED |\n\n- Media Settings Error\n- Pinned Chats Limit\n- Deleted status icon\n\n| ADDED |\n\n- Support to 2.25.7.x (may contain errors)"
+  "version": "0.1.2",
+  "date": "06-03-2026",
+  "link": "https://t.me/warevampmodule",
+  "changelog": "| FIXED |\n\n- Features not working on WhatsApp 2.26.7.75\n- Hardcoded obfuscated field names (A00, A01, A02, A06, A0F) replaced with dynamic type-based discovery\n- saveConstructor cache not persisting (missing .apply())\n\n| ADDED |\n\n- Support for WhatsApp 2.26.7.x"
 }

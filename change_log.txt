@@ -1,9 +1,10 @@
 | FIXED |
 
-- Media Settings Error
-- Pinned Chats Limit
-- Deleted status icon
+- Features not working on WhatsApp 2.26.7.75
+- Hardcoded obfuscated field names (A00, A01, A02, A06, A0F) replaced with
+  dynamic type-based discovery so they survive WhatsApp obfuscation changes
+- saveConstructor cache not persisting (missing .apply())
 
 | ADDED |
 
-- Support to 2.25.7.x (may contain errors)
+- Support for WhatsApp 2.26.7.x

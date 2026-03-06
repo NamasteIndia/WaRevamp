@@ -34,6 +34,11 @@ public class SeparateGroupsHook extends HooksBase {
     public static ArrayList<Integer> tabs = new ArrayList<>();
     public static HashMap<Integer, Object> tabInstances = new HashMap<>();
 
+    // Cached field references resolved on first use (obfuscated names change per WhatsApp version)
+    private static volatile Field cachedDescField = null;
+    private static volatile Field cachedConvFragField = null;
+    private static volatile Field cachedChatJidField = null;
+
     public SeparateGroupsHook(@NonNull @NotNull ClassLoader loader, @NonNull @NotNull XSharedPreferences preferences) {
         super(loader, preferences);
     }
@@ -57,6 +62,58 @@ public class SeparateGroupsHook extends HooksBase {
         hookTabIcon();
     }
 
+    /**
+     * Returns the descriptor field from {@code object} (the 3rd constructor arg).
+     * The descriptor's toString() returns something like "FragmentType:<tabId>",
+     * so we identify the correct field by finding one whose toString() ends with ":<integer>".
+     * The result is cached to avoid repeated scanning.
+     */
+    private static Object getFragmentDesc(Object object) {
+        if (cachedDescField != null) {
+            try { return cachedDescField.get(object); } catch (Exception ignored) {}
+        }
+        for (Field f : object.getClass().getDeclaredFields()) {
+            if (f.getType().isPrimitive()) continue;
+            f.setAccessible(true);
+            try {
+                Object val = f.get(object);
+                if (val == null) continue;
+                String[] parts = val.toString().split(":");
+                if (parts.length > 1) {
+                    // Validates the last segment is an integer (e.g. tab ID 200, 700…)
+                    int tabId = Integer.parseInt(parts[parts.length - 1]);
+                    if (tabId > 0) {
+                        cachedDescField = f;
+                        return val;
+                    }
+                }
+            } catch (NumberFormatException | IllegalAccessException ignored) {}
+        }
+        return null;
+    }
+
+    /**
+     * Returns the {@code ConversationsFragment} instance held by {@code thisObject} (the
+     * recreateFragment constructor's {@code this}).  Finds the field by type on first call.
+     */
+    private static Object getConvFrag(Object thisObject, Class<?> cFrag) {
+        if (cachedConvFragField != null) {
+            try { return cachedConvFragField.get(thisObject); } catch (Exception ignored) {}
+        }
+        for (Field f : thisObject.getClass().getDeclaredFields()) {
+            if (f.getType().isPrimitive()) continue;
+            f.setAccessible(true);
+            try {
+                Object val = f.get(thisObject);
+                if (val != null && cFrag.isInstance(val)) {
+                    cachedConvFragField = f;
+                    return val;
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
     private void hookTabInstance() throws Exception {
         Class<?> cFrag = XposedHelpers.findClass("com.whatsapp.conversationslist.ConversationsFragment", loader);
         Method getTabMethod = getTabMethod(loader);
@@ -67,7 +124,7 @@ public class SeparateGroupsHook extends HooksBase {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                 var object = param.args[2];
-                var desc = XposedHelpers.getObjectField(object, "A06");
+                var desc = getFragmentDesc(object);
                 log(desc != null ? desc.toString() : "void");
                 if (desc == null) return;
                 var split = desc.toString().split(":");
@@ -78,7 +135,7 @@ public class SeparateGroupsHook extends HooksBase {
                     return;
                 }
                 if (id == GROUPS || id == CHATS) {
-                    var convFragment = XposedHelpers.getObjectField(param.thisObject, "A02");
+                    var convFragment = getConvFrag(param.thisObject, cFrag);
                     tabInstances.remove(id);
                     tabInstances.put(id, convFragment);
                 }
@@ -210,10 +267,16 @@ public class SeparateGroupsHook extends HooksBase {
                 if (superClass != null && superClass == iconTabMethod.getDeclaringClass()) {
                     field1 = superClass.getDeclaredField(iconField.getName()).get(param.thisObject);
                 } else {
+                    // Find the intermediate container field by type rather than hardcoded "A00"
                     Class<?> cls = param.thisObject.getClass();
-                    Object field = cls.getDeclaredField("A00").get(param.thisObject);
+                    Class<?> iconContainerType = iconField.getDeclaringClass();
+                    Field containerField = Arrays.stream(cls.getDeclaredFields())
+                            .filter(f -> f.getType().equals(iconContainerType))
+                            .findFirst().orElse(null);
+                    if (containerField == null) return;
+                    containerField.setAccessible(true);
+                    Object field = containerField.get(param.thisObject);
                     field1 = iconField.get(field);
-
                 }
                 if (field1 == null) return;
 
@@ -318,14 +381,35 @@ public class SeparateGroupsHook extends HooksBase {
 
         private boolean checkGroup(Object chat) {
             var requiredServer = isGroup ? "g.us" : "s.whatsapp.net";
-            var jid = XposedHelpers.getObjectField(chat, "A00");
-            if (jid == null) jid = XposedHelpers.getObjectField(chat, "A01");
+            var jid = getChatJid(chat);
             if (jid == null) return true;
             if (XposedHelpers.findMethodExactIfExists(jid.getClass(), "getServer") != null) {
                 var server = (String) XposedHelpers.callMethod(jid, "getServer");
                 return server.equals(requiredServer);
             }
             return true;
+        }
+
+        /**
+         * Finds the JID field in a chat object by looking for the first non-primitive, non-String
+         * field whose type has a {@code getServer()} method. The result is cached.
+         */
+        private static Object getChatJid(Object chat) {
+            if (cachedChatJidField != null) {
+                try { return cachedChatJidField.get(chat); } catch (Exception ignored) {}
+            }
+            for (Field f : chat.getClass().getDeclaredFields()) {
+                if (f.getType().isPrimitive() || f.getType().equals(String.class)) continue;
+                f.setAccessible(true);
+                try {
+                    Object val = f.get(chat);
+                    if (val != null && XposedHelpers.findMethodExactIfExists(val.getClass(), "getServer") != null) {
+                        cachedChatJidField = f;
+                        return val;
+                    }
+                } catch (Exception ignored) {}
+            }
+            return null;
         }
     }
 

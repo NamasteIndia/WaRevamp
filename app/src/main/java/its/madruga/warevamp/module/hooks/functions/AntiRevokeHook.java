@@ -79,6 +79,9 @@ public class AntiRevokeHook extends HooksBase {
         String antiRevoke = prefs.getString("antiRevoke", "disable");
         String antiRevokeStatus = prefs.getString("antiRevokeStatus", "disable");
 
+        // Pre-resolve status-event fields so the hook callbacks don't need DexKit
+        Field fMsgFieldInEvent = statusEventFMessageField(loader);
+        Field tvFieldInView    = statusPlaybackTextViewField(loader);
 
         XposedBridge.hookMethod(antiRevokeMethod(loader), new XC_MethodHook() {
             @Override
@@ -108,10 +111,10 @@ public class AntiRevokeHook extends HooksBase {
         XposedBridge.hookMethod(unknownStatusPlaybackMethod(loader), new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                FMessageInfo fMessageInfo = new FMessageInfo(XposedHelpers.getObjectField(param.args[0], "A00"));
+                FMessageInfo fMessageInfo = new FMessageInfo(fMsgFieldInEvent.get(param.args[0]));
                 Object obj = Arrays.stream(param.args).filter(a -> a.getClass().equals(param.method.getDeclaringClass())).findFirst().orElse(null);
                 Object objView = statusPlaybackField(loader).get(obj);
-                TextView dateTextView = (TextView) XposedHelpers.getObjectField(objView, "A0F");
+                TextView dateTextView = (TextView) tvFieldInView.get(objView);
                 isMRevoked(fMessageInfo, dateTextView, "antiRevokeStatus");
             }
         });
@@ -159,8 +162,9 @@ public class AntiRevokeHook extends HooksBase {
     }
 
     private String antiRevoke(FMessageInfo fMessageInfo) {
-        String messageKey = (String) XposedHelpers.getObjectField(fMessageInfo.getObject(), "A01");
-        String stripJID = stripJID(getRawString(fMessageInfo.getKey().remoteJid));
+        FMessageInfo.Key key = fMessageInfo.getKey();
+        String messageKey = key != null ? key.messageID : null;
+        String stripJID = stripJID(getRawString(key != null ? key.remoteJid : null));
         String revokeBoolean = stripJID.equals("status") ? prefs.getString("antiRevokeStatus", "disable") : getCustomPref(stripJID, "antiRevoke") ? "text" : prefs.getString("antiRevoke", "disable");
         if (revokeBoolean.equals("disable")) return revokeBoolean;
         if (!messageRevokedList.contains(messageKey)) {

@@ -130,6 +130,136 @@ public class References {
         return result;
     }
 
+    /**
+     * Finds the field in the Key class that holds the remote JID (a non-String, non-primitive
+     * object field). The result is cached so DexKit runs only once per WhatsApp version.
+     */
+    public synchronized static Field keyRemoteJidField(ClassLoader loader) throws Exception {
+        Field result = getField("keyRemoteJidField");
+        if (result != null) return result;
+        Class<?> keyClass = keyMessageClass(loader);
+        result = Arrays.stream(keyClass.getDeclaredFields())
+                .filter(f -> !f.getType().isPrimitive() && !f.getType().equals(String.class))
+                .findFirst().orElse(null);
+        if (result == null) throw new Exception("keyRemoteJidField not found");
+        result.setAccessible(true);
+        saveFieldPath(result, "keyRemoteJidField");
+        return result;
+    }
+
+    /**
+     * Finds the field in the Key class that holds the message ID (the sole String field).
+     */
+    public synchronized static Field keyMessageIdField(ClassLoader loader) throws Exception {
+        Field result = getField("keyMessageIdField");
+        if (result != null) return result;
+        Class<?> keyClass = keyMessageClass(loader);
+        result = Arrays.stream(keyClass.getDeclaredFields())
+                .filter(f -> f.getType().equals(String.class))
+                .findFirst().orElse(null);
+        if (result == null) throw new Exception("keyMessageIdField not found");
+        result.setAccessible(true);
+        saveFieldPath(result, "keyMessageIdField");
+        return result;
+    }
+
+    /**
+     * Finds the field in the Key class that holds the isFromMe flag (the sole boolean field).
+     */
+    public synchronized static Field keyIsFromMeField(ClassLoader loader) throws Exception {
+        Field result = getField("keyIsFromMeField");
+        if (result != null) return result;
+        Class<?> keyClass = keyMessageClass(loader);
+        result = Arrays.stream(keyClass.getDeclaredFields())
+                .filter(f -> f.getType().equals(boolean.class))
+                .findFirst().orElse(null);
+        if (result == null) throw new Exception("keyIsFromMeField not found");
+        result.setAccessible(true);
+        saveFieldPath(result, "keyIsFromMeField");
+        return result;
+    }
+
+    /**
+     * Finds the field in the first argument of {@link #unknownStatusPlaybackMethod} that holds
+     * the FMessage object, identified by its assignability to the FMessage class.
+     */
+    public synchronized static Field statusEventFMessageField(ClassLoader loader) throws Exception {
+        Field result = getField("statusEventFMessageField");
+        if (result != null) return result;
+        Method method = unknownStatusPlaybackMethod(loader);
+        Class<?> argClass = method.getParameterTypes()[0];
+        Class<?> fMessageClass = FMessageClass(loader);
+        result = Arrays.stream(argClass.getDeclaredFields())
+                .filter(f -> fMessageClass.isAssignableFrom(f.getType()))
+                .findFirst().orElse(null);
+        if (result == null) throw new Exception("statusEventFMessageField not found");
+        result.setAccessible(true);
+        saveFieldPath(result, "statusEventFMessageField");
+        return result;
+    }
+
+    /**
+     * Finds the {@link android.widget.TextView} field inside the status-playback view class
+     * (the class held by {@link #statusPlaybackField}). Uses DexKit field-use analysis on
+     * {@link #unknownStatusPlaybackMethod} for precision, with a type-scan fallback.
+     */
+    public synchronized static Field statusPlaybackTextViewField(ClassLoader loader) throws Exception {
+        Field result = getField("statusPlaybackTextViewField");
+        if (result != null) return result;
+        Field spField = statusPlaybackField(loader);
+        Class<?> objViewClass = spField.getType();
+        // Use DexKit to find precisely which TextView field the method reads
+        MethodData methodData = dexKitBridge.getMethodData(unknownStatusPlaybackMethod(loader));
+        if (methodData != null) {
+            for (UsingFieldData ufd : methodData.getUsingFields()) {
+                FieldData fd = ufd.getField();
+                if (fd.getDeclaredClass().getName().equals(objViewClass.getName())
+                        && fd.getType().getName().equals(android.widget.TextView.class.getName())) {
+                    result = fd.getFieldInstance(loader);
+                    break;
+                }
+            }
+        }
+        // Fallback: first TextView field in the view class
+        if (result == null) {
+            result = Arrays.stream(objViewClass.getDeclaredFields())
+                    .filter(f -> f.getType().equals(android.widget.TextView.class))
+                    .findFirst().orElse(null);
+        }
+        if (result == null) throw new Exception("statusPlaybackTextViewField not found");
+        result.setAccessible(true);
+        saveFieldPath(result, "statusPlaybackTextViewField");
+        return result;
+    }
+
+    /**
+     * Finds the int field in {@code StatusPlaybackBaseFragment} (or a subclass) that stores the
+     * current page index. Uses DexKit field-use analysis on the status-menu click method.
+     */
+    public synchronized static Field statusPlaybackPageIndexField(ClassLoader loader) throws Exception {
+        Field result = getField("statusPlaybackPageIndexField");
+        if (result != null) return result;
+        Class<?> fragmentClass = loader.loadClass("com.whatsapp.status.playback.fragment.StatusPlaybackBaseFragment");
+        MethodData clickData = dexKitBridge.getMethodData(menuStatusClickMethod(loader));
+        if (clickData != null) {
+            for (UsingFieldData ufd : clickData.getUsingFields()) {
+                FieldData fd = ufd.getField();
+                if (!int.class.getName().equals(fd.getType().getName())) continue;
+                try {
+                    Class<?> declaring = loader.loadClass(fd.getDeclaredClass().getName());
+                    if (fragmentClass.isAssignableFrom(declaring)) {
+                        result = fd.getFieldInstance(loader);
+                        break;
+                    }
+                } catch (ClassNotFoundException ignored) {}
+            }
+        }
+        if (result == null) throw new Exception("statusPlaybackPageIndexField not found");
+        result.setAccessible(true);
+        saveFieldPath(result, "statusPlaybackPageIndexField");
+        return result;
+    }
+
     public synchronized static Field statusPlaybackField(ClassLoader loader) throws Exception {
         Field result = getField("statusPlaybackField");
         if (result != null) return result;
