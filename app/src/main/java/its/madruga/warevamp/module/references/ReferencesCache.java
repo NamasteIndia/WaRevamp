@@ -12,6 +12,25 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 
+/**
+ * Persists resolved WhatsApp method, constructor, field, and class references to
+ * {@link SharedPreferences} so they can be reconstructed on subsequent app launches without
+ * re-running DexKit.
+ *
+ * <h3>Storage format</h3>
+ * References are serialised as tilde-delimited strings:
+ * <ul>
+ *   <li><b>Method:</b>  {@code ClassName~methodName[~paramType1:paramType2:…]}</li>
+ *   <li><b>Constructor:</b> {@code ClassName[~paramType1:paramType2:…]}</li>
+ *   <li><b>Field:</b>   {@code ClassName~fieldName}</li>
+ *   <li><b>Class:</b>   {@code ClassName}</li>
+ * </ul>
+ *
+ * <h3>Version tracking</h3>
+ * {@link #checkWppVersion()} compares the currently installed WhatsApp version against the
+ * version that was recorded when the cache was last populated. If they differ (i.e. WhatsApp
+ * updated), the entire cache is cleared so stale references are not used.
+ */
 public class ReferencesCache {
     private static Context context;
     private static SharedPreferences preferences;
@@ -142,7 +161,7 @@ public class ReferencesCache {
     }
 
     public static void saveConstructor(Constructor<?> constructor, String hookName) {
-        preferences.edit().putString(hookName,getConstructorPathString(constructor));
+        preferences.edit().putString(hookName, getConstructorPathString(constructor)).apply();
     }
 
     public static void saveClassPath(Class<?> clazz, String hookName) {

@@ -32,6 +32,35 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Objects;
 
+/**
+ * Prevents WhatsApp from deleting messages that the sender revokes.
+ *
+ * <h3>How it works</h3>
+ * <ol>
+ *   <li>Hooks the internal revoke method that WhatsApp calls when it receives a delete-for-all
+ *       request. If the preference is enabled, the hook intercepts the call and returns
+ *       {@code true} (abort deletion) before WhatsApp can remove the message from the
+ *       conversation.</li>
+ *   <li>The message's key is saved asynchronously to a contact-scoped SharedPreferences entry
+ *       so the module remembers which messages were revoked across sessions.</li>
+ *   <li>After saving, the conversation activity is refreshed so the recovered message appears
+ *       immediately.</li>
+ *   <li>Hooks the bubble-rendering method to annotate recovered messages with a configurable
+ *       indicator:
+ *       <ul>
+ *         <li><b>text</b> — prepends a localised "deleted" string to the timestamp view.</li>
+ *         <li><b>icon</b> — adds a red block icon as a compound drawable on the timestamp view.</li>
+ *       </ul>
+ *   </li>
+ * </ol>
+ *
+ * <h3>Preferences</h3>
+ * <ul>
+ *   <li>{@code antiRevoke} — {@code "disable"} | {@code "text"} | {@code "icon"} (regular chats)</li>
+ *   <li>{@code antiRevokeStatus} — same options for Status updates</li>
+ * </ul>
+ * Per-contact overrides are also supported via {@link CustomPrivacyHook#getCustomPref}.
+ */
 public class AntiRevokeHook extends HooksBase {
     private static HashSet<String> messageRevokedList = new HashSet<>();
     @SuppressLint("StaticFieldLeak")
@@ -50,6 +79,9 @@ public class AntiRevokeHook extends HooksBase {
         String antiRevoke = prefs.getString("antiRevoke", "disable");
         String antiRevokeStatus = prefs.getString("antiRevokeStatus", "disable");
 
+        // Pre-resolve status-event fields so the hook callbacks don't need DexKit
+        Field fMsgFieldInEvent = statusEventFMessageField(loader);
+        Field tvFieldInView    = statusPlaybackTextViewField(loader);
 
         XposedBridge.hookMethod(antiRevokeMethod(loader), new XC_MethodHook() {
             @Override
@@ -79,10 +111,10 @@ public class AntiRevokeHook extends HooksBase {
         XposedBridge.hookMethod(unknownStatusPlaybackMethod(loader), new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                FMessageInfo fMessageInfo = new FMessageInfo(XposedHelpers.getObjectField(param.args[0], "A00"));
+                FMessageInfo fMessageInfo = new FMessageInfo(fMsgFieldInEvent.get(param.args[0]));
                 Object obj = Arrays.stream(param.args).filter(a -> a.getClass().equals(param.method.getDeclaringClass())).findFirst().orElse(null);
                 Object objView = statusPlaybackField(loader).get(obj);
-                TextView dateTextView = (TextView) XposedHelpers.getObjectField(objView, "A0F");
+                TextView dateTextView = (TextView) tvFieldInView.get(objView);
                 isMRevoked(fMessageInfo, dateTextView, "antiRevokeStatus");
             }
         });
@@ -130,8 +162,9 @@ public class AntiRevokeHook extends HooksBase {
     }
 
     private String antiRevoke(FMessageInfo fMessageInfo) {
-        String messageKey = (String) XposedHelpers.getObjectField(fMessageInfo.getObject(), "A01");
-        String stripJID = stripJID(getRawString(fMessageInfo.getKey().remoteJid));
+        FMessageInfo.Key key = fMessageInfo.getKey();
+        String messageKey = key != null ? key.messageID : null;
+        String stripJID = stripJID(getRawString(key != null ? key.remoteJid : null));
         String revokeBoolean = stripJID.equals("status") ? prefs.getString("antiRevokeStatus", "disable") : getCustomPref(stripJID, "antiRevoke") ? "text" : prefs.getString("antiRevoke", "disable");
         if (revokeBoolean.equals("disable")) return revokeBoolean;
         if (!messageRevokedList.contains(messageKey)) {

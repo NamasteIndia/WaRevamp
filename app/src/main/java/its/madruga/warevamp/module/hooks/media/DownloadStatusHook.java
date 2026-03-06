@@ -4,6 +4,7 @@ import static its.madruga.warevamp.module.hooks.core.HooksLoader.mApp;
 import static its.madruga.warevamp.module.references.ModuleResources.string.download_status;
 import static its.madruga.warevamp.module.references.References.menuManagerClass;
 import static its.madruga.warevamp.module.references.References.menuStatusClickMethod;
+import static its.madruga.warevamp.module.references.References.statusPlaybackPageIndexField;
 
 import android.media.MediaScannerConnection;
 import android.os.Environment;
@@ -59,9 +60,20 @@ public class DownloadStatusHook extends HooksBase {
                 Menu menu = (Menu) ReferencesUtils.getObjectField(menuField, menuManager);
                 Object fragmentInstance = fieldObjects.stream().filter(StatusPlaybackBaseFragmentClass::isInstance).findFirst().orElse(null);
 
-                int index = (int) XposedHelpers.getObjectField(fragmentInstance, "A00");
+                // Resolve the page-index int field dynamically instead of hardcoded "A00"
+                Field pageIndexField = statusPlaybackPageIndexField(loader);
+                int index = pageIndexField.getInt(fragmentInstance);
                 List<?> listStatus = (List<?>) listStatusField.get(fragmentInstance);
-                FMessageInfo messageInfo = new FMessageInfo(XposedHelpers.getObjectField(listStatus.get(index), "A00"));
+
+                // Resolve the FMessage field in the status item dynamically instead of hardcoded "A00"
+                Object statusItem = listStatus.get(index);
+                Class<?> fMessageClass = FMessageInfo.TYPE;
+                Field fMessageFieldInItem = Arrays.stream(statusItem.getClass().getDeclaredFields())
+                        .filter(f -> fMessageClass != null && fMessageClass.isAssignableFrom(f.getType()))
+                        .findFirst().orElse(null);
+                if (fMessageFieldInItem == null) return;
+                fMessageFieldInItem.setAccessible(true);
+                FMessageInfo messageInfo = new FMessageInfo(fMessageFieldInItem.get(statusItem));
 
                 File file = messageInfo.getMediaFile();
                 MenuItem menuItem = menu.findItem(download_status);
