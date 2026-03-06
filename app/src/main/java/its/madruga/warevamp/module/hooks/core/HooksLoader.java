@@ -42,12 +42,53 @@ import its.madruga.warevamp.module.hooks.functions.AntiRevokeHook;
 import its.madruga.warevamp.module.hooks.functions.AntiViewOnceHook;
 import its.madruga.warevamp.module.references.ReferencesCache;
 
+/**
+ * Central orchestrator for all WaRevamp hooks inside the WhatsApp process.
+ *
+ * <h3>Initialisation sequence</h3>
+ * <ol>
+ *   <li>{@link #initialize} is called from {@link its.madruga.warevamp.module.ModuleStart}
+ *       when WhatsApp's package is loaded.</li>
+ *   <li>DexKit is started via {@link References#initDexKit} so WhatsApp's obfuscated bytecode
+ *       can be searched at runtime.</li>
+ *   <li>A hook on {@code Instrumentation.callApplicationOnCreate} captures the
+ *       {@link Application} instance as soon as WhatsApp creates it, then:
+ *       <ul>
+ *         <li>Registers a {@link WppCallback} to monitor Activity lifecycle events.</li>
+ *         <li>Initialises {@link ReferencesCache} to persist resolved method/field paths.</li>
+ *         <li>Calls {@link References#start()} to resolve all required WhatsApp symbols.</li>
+ *         <li>Calls {@link #plugins} to load every feature hook.</li>
+ *         <li>Starts the broadcast receivers/senders for cross-process IPC.</li>
+ *       </ul>
+ *   </li>
+ *   <li>A hook on WhatsApp's home {@code Activity.onCreate} stores the {@link Activity}
+ *       reference and shows an error dialog if any hooks failed to load.</li>
+ * </ol>
+ *
+ * <h3>Plugin loading</h3>
+ * {@link #plugins} iterates over a fixed array of hook classes, constructs each one via
+ * reflection ({@code constructor(ClassLoader, XSharedPreferences)}), and invokes
+ * {@link HooksBase#doHook()}. If a hook throws an {@link java.lang.reflect.InvocationTargetException}
+ * its simple class name is added to {@link #list} and reported to the user.
+ */
 public class HooksLoader {
+    /** The WhatsApp {@link Application} instance captured after app creation. */
     public static Application mApp;
+    /** The WhatsApp home {@link Activity} captured after its first {@code onCreate}. */
     @SuppressLint("StaticFieldLeak")
     public static Activity home;
+    /** Hook class names that failed to load; shown in an error dialog on home-screen open. */
     public static ArrayList<String> list = new ArrayList<>();
 
+    /**
+     * Starts DexKit and installs the top-level Instrumentation/Activity hooks.
+     * Must be called from {@link its.madruga.warevamp.module.ModuleStart#handleLoadPackage}.
+     *
+     * @param pref      the module's shared preferences
+     * @param loader    WhatsApp's class loader
+     * @param sourceDir path to WhatsApp's base APK (used by DexKit for bytecode scanning)
+     * @throws Exception if DexKit fails to initialise or a required class cannot be found
+     */
     public static void initialize(XSharedPreferences pref, ClassLoader loader, String sourceDir) throws Exception {
 
         XposedBridge.log("Starting WhatsApp Broadcasts");
@@ -89,6 +130,17 @@ public class HooksLoader {
         });
     }
 
+    /**
+     * Instantiates and activates every feature hook registered in the {@code classes} array.
+     *
+     * <p>Each hook class must expose a public constructor with signature
+     * {@code (ClassLoader, XSharedPreferences)} and a no-arg {@code doHook()} method
+     * (inherited from {@link HooksBase}).  Hooks that throw during {@code doHook()} are
+     * silently skipped but their names are recorded in {@link #list} for later reporting.
+     *
+     * @param loader class loader passed to each hook
+     * @param pref   shared preferences passed to each hook
+     */
     private static void plugins(@NonNull ClassLoader loader, @NonNull XSharedPreferences pref) {
         ArrayList<String> loadedClasses = new ArrayList<>();
         var classes = new Class<?>[]{

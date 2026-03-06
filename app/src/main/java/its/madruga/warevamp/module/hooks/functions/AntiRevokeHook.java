@@ -32,6 +32,35 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Objects;
 
+/**
+ * Prevents WhatsApp from deleting messages that the sender revokes.
+ *
+ * <h3>How it works</h3>
+ * <ol>
+ *   <li>Hooks the internal revoke method that WhatsApp calls when it receives a delete-for-all
+ *       request. If the preference is enabled, the hook intercepts the call and returns
+ *       {@code true} (abort deletion) before WhatsApp can remove the message from the
+ *       conversation.</li>
+ *   <li>The message's key is saved asynchronously to a contact-scoped SharedPreferences entry
+ *       so the module remembers which messages were revoked across sessions.</li>
+ *   <li>After saving, the conversation activity is refreshed so the recovered message appears
+ *       immediately.</li>
+ *   <li>Hooks the bubble-rendering method to annotate recovered messages with a configurable
+ *       indicator:
+ *       <ul>
+ *         <li><b>text</b> — prepends a localised "deleted" string to the timestamp view.</li>
+ *         <li><b>icon</b> — adds a red block icon as a compound drawable on the timestamp view.</li>
+ *       </ul>
+ *   </li>
+ * </ol>
+ *
+ * <h3>Preferences</h3>
+ * <ul>
+ *   <li>{@code antiRevoke} — {@code "disable"} | {@code "text"} | {@code "icon"} (regular chats)</li>
+ *   <li>{@code antiRevokeStatus} — same options for Status updates</li>
+ * </ul>
+ * Per-contact overrides are also supported via {@link CustomPrivacyHook#getCustomPref}.
+ */
 public class AntiRevokeHook extends HooksBase {
     private static HashSet<String> messageRevokedList = new HashSet<>();
     @SuppressLint("StaticFieldLeak")
